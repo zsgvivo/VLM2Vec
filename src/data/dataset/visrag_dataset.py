@@ -100,9 +100,9 @@ def load_visreg_dataset(model_args, data_args, training_args, *args, **kwargs):
     kwargs['image_resolution'] = data_args.image_resolution
     kwargs['global_dataset_name'] = global_dataset_name
     # dataset = dataset.shuffle(buffer_size=8192, seed=training_args.seed)
+    columns_to_remove = dataset.column_names  # drop original columns so resulting schema only has multimodal fields
     dataset = dataset.map(lambda x: data_prepare(x, **kwargs), batched=True, batch_size=128,
-                          remove_columns=['image'],
-                          # remove_columns=['query', 'image', 'source'],
+                          remove_columns=columns_to_remove,
                           drop_last_batch = True)
     dataset = dataset.cast(MULTIMODAL_FEATURES)
     setattr(dataset, 'num_rows', num_rows)
