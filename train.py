@@ -21,7 +21,7 @@ from src.model.model import MMEBModel
 from src.trainer import GradCacheLateProcessTrainer
 from src.utils.basic_utils import print_rank, print_master, find_latest_checkpoint
 from src.model.processor import load_processor, get_backbone_name
-
+import time
 
 def main():
     # a hack for torch.distributed.launch: https://github.com/huggingface/transformers/issues/22171
@@ -91,7 +91,42 @@ def main():
                 image_dir = task_config.get('image_dir')
                 if image_dir and not os.path.isabs(image_dir):
                     task_config['image_dir'] = os.path.join(data_args.data_basedir, image_dir)
-        train_dataset = init_mixed_dataset(dataset_config, model_args, data_args, training_args)
+        if not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
+            print_rank("Rank 0: Start Loading Dataset...")
+            attempt = 0
+            while True:
+                attempt += 1
+                try:
+                    train_dataset = init_mixed_dataset(dataset_config, model_args, data_args, training_args)
+                    print_rank(f"Rank 0: Dataset Ready (Success after {attempt} attempts).")
+                    break
+                except Exception as e:
+                    print(f"⚠️ Rank 0 Dataset Load Failed (Attempt {attempt}): {e}")
+                    sleep_time = min(300, 30 * attempt)
+                    print(f"💤 Sleeping {sleep_time}s waiting for network/IP ban to lift...")
+                    time.sleep(sleep_time)
+
+
+        if torch.distributed.is_initialized() and torch.distributed.get_rank() != 0:
+            rank = torch.distributed.get_rank()
+            initial_wait = rank * 5
+            print(f"[Rank {rank}] Sleeping {initial_wait}s to avoid API congestion...")
+            time.sleep(initial_wait)
+            
+            for attempt in range(10):
+                try:
+                    print(f"[Rank {rank}] Loading Dataset (Attempt {attempt+1})...")
+                    train_dataset = init_mixed_dataset(dataset_config, model_args, data_args, training_args)
+                    print(f"[Rank {rank}] Load Success!")
+                    break
+                except Exception as e:
+                    print(f"⚠️ [Rank {rank}] Failed. Sleeping... Error: {e}")
+                    time.sleep(30 + rank * 5)
+            else:
+                raise RuntimeError(f"Rank {rank} failed to load dataset.")
+        if torch.distributed.is_initialized():
+            print(f"Rank {torch.distributed.get_rank()}: Releasing barrier.")
+            torch.distributed.barrier()
     train_collator = MultimodalDataCollator(processor, model_args, data_args, training_args)
 
     trainer_cls = GradCacheLateProcessTrainer
