@@ -4,7 +4,7 @@ from datasets import load_dataset, concatenate_datasets
 from PIL import Image
 import os
 from datasets.features.image import image_to_bytes
-
+import torch
 from torch.jit import isinstance
 from src.data.dataset.base_pair_dataset import AutoPairDataset, add_metainfo_hook, MULTIMODAL_FEATURES, \
     RESOLUTION_MAPPING
@@ -95,7 +95,8 @@ def load_mmeb_dataset(model_args, data_args, training_args, *args, **kwargs):
         dataset = dataset.select(range(num_rows))
     num_rows = dataset.num_rows
 
-    num_shards = training_args.dataloader_num_workers if training_args.dataloader_num_workers > 0 else 1
+    num_shards = training_args.dataloader_num_workers * torch.distributed.get_world_size() if training_args.dataloader_num_workers > 0 else 1
+    print_rank(f"num_shards={num_shards}")
     dataset = dataset.to_iterable_dataset(num_shards=num_shards)  # convert to IterableDataset and multiple shards
 
     kwargs['model_backbone'] = model_args.model_backbone

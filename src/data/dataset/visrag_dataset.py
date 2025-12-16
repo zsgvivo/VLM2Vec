@@ -1,10 +1,12 @@
 from datasets import load_dataset
 from PIL import Image
 from datasets.features.image import image_to_bytes
+import torch
 from torch.jit import isinstance
 from src.data.dataset.base_pair_dataset import AutoPairDataset, add_metainfo_hook, MULTIMODAL_FEATURES, \
     RESOLUTION_MAPPING
 from src.model.processor import VLM_IMAGE_TOKENS
+from src.utils.basic_utils import print_rank
 
 
 def process_query(query, prompt, image_token=''):
@@ -93,7 +95,13 @@ def load_visreg_dataset(model_args, data_args, training_args, *args, **kwargs):
         dataset = dataset.select(range(num_rows))
     num_rows = dataset.num_rows
 
-    num_shards = training_args.dataloader_num_workers if training_args.dataloader_num_workers > 0 else 1
+    num_workers = training_args.dataloader_num_workers
+    if num_workers > 0:
+        world_size = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
+        num_shards = num_workers * world_size
+    else:
+        num_shards = 1
+    print_rank(f"num_shards={num_shards}")
     dataset = dataset.to_iterable_dataset(num_shards=num_shards)  # convert to IterableDataset and multiple shards
 
     kwargs['model_backbone'] = model_args.model_backbone

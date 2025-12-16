@@ -1,9 +1,11 @@
 import os
 
 import datasets
+import torch
 from src.data.dataset.base_pair_dataset import AutoPairDataset, add_metainfo_hook, MULTIMODAL_FEATURES, \
     RESOLUTION_MAPPING
 from src.model.processor import VLM_VIDEO_TOKENS
+from src.utils.basic_utils import print_rank
 from src.utils.vision_utils.vision_utils import process_video_frames
 
 
@@ -60,7 +62,13 @@ def load_llavahound_qa_dataset(model_args, data_args, training_args, *args, **kw
         dataset = dataset.select(range(num_rows))
     num_rows = dataset.num_rows
 
-    num_shards = training_args.dataloader_num_workers if training_args.dataloader_num_workers > 0 else 1
+    num_workers = training_args.dataloader_num_workers
+    if num_workers > 0:
+        world_size = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
+        num_shards = num_workers * world_size
+    else:
+        num_shards = 1
+    print_rank(f"num_shards={num_shards}")
     dataset = dataset.to_iterable_dataset(num_shards=num_shards)  # convert to IterableDataset and multiple shards
 
     kwargs['model_backbone'] = model_args.model_backbone
